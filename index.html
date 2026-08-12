@@ -1,15 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-
 <meta charset="UTF-8">
-
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <title>Excel Splitter</title>
 
-<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<!-- ExcelJS -->
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 
+<!-- JSZip -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
 <style>
@@ -32,6 +32,7 @@ body {
 
 h1 {
     margin-top: 0;
+    color: #222;
 }
 
 .upload-box {
@@ -42,11 +43,12 @@ h1 {
     margin: 20px 0;
 }
 
-select,
-input[type="file"] {
+input[type="file"],
+select {
     padding: 10px;
     margin: 8px;
     font-size: 15px;
+    max-width: 90%;
 }
 
 button {
@@ -69,6 +71,11 @@ button {
     display: none;
 }
 
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 #status {
     margin-top: 20px;
     font-weight: bold;
@@ -81,8 +88,11 @@ button {
     margin-top: 20px;
 }
 
-</style>
+.info div {
+    margin: 5px 0;
+}
 
+</style>
 </head>
 
 
@@ -90,133 +100,101 @@ button {
 
 <div class="container">
 
-<h1>Excel Splitter</h1>
+    <h1>Excel Splitter</h1>
 
+    <div class="upload-box">
 
-<div class="upload-box">
+        <input
+            type="file"
+            id="fileInput"
+            accept=".xlsx,.xls"
+        >
 
-    <input
-        type="file"
-        id="fileInput"
-        accept=".xls,.xlsx"
-    >
+        <br>
 
-    <br>
+        <label>
+            <b>Sheet:</b>
+        </label>
 
+        <select
+            id="sheetSelect"
+            disabled
+        >
+            <option>Select Excel first</option>
+        </select>
 
-    <label>
-        <b>Sheet:</b>
-    </label>
+        <br>
 
+        <label>
+            <b>Split By Column:</b>
+        </label>
 
-    <select id="sheetSelect" disabled>
+        <select
+            id="columnSelect"
+            disabled
+        >
+            <option>Select Sheet first</option>
+        </select>
 
-        <option>
-            Select Excel first
-        </option>
+        <br>
 
-    </select>
+        <button
+            id="splitBtn"
+            disabled
+        >
+            Split Excel
+        </button>
 
-
-    <br>
-
-
-    <label>
-        <b>Split By Column:</b>
-    </label>
-
-
-    <select id="columnSelect" disabled>
-
-        <option>
-            Select Sheet first
-        </option>
-
-    </select>
-
-
-    <br>
-
-
-    <button id="splitBtn">
-
-        Split Excel
-
-    </button>
-
-
-    <button id="downloadBtn">
-
-        Download ZIP
-
-    </button>
-
-</div>
-
-
-<div class="info">
-
-    <div>
-
-        <b>File:</b>
-
-        <span id="fileName">
-            -
-        </span>
+        <button
+            id="downloadBtn"
+        >
+            Download ZIP
+        </button>
 
     </div>
 
 
-    <div>
+    <div class="info">
 
-        <b>Total Rows:</b>
+        <div>
+            <b>File:</b>
+            <span id="fileName">-</span>
+        </div>
 
-        <span id="rowCount">
-            -
-        </span>
+        <div>
+            <b>Total Rows:</b>
+            <span id="rowCount">-</span>
+        </div>
 
-    </div>
-
-
-    <div>
-
-        <b>Number of Files:</b>
-
-        <span id="fileCount">
-            -
-        </span>
+        <div>
+            <b>Number of Files:</b>
+            <span id="fileCount">-</span>
+        </div>
 
     </div>
 
-</div>
 
-
-<div id="status"></div>
+    <div id="status"></div>
 
 </div>
 
 
 <script>
 
+let sourceWorkbook = null;
 
-let workbook = null;
+let selectedSheetName = "";
 
-let currentSheetName = "";
+let sourceWorksheet = null;
 
-let currentWorksheet = null;
+let sourceFileName = "";
 
-let currentRows = [];
-
-let headers = [];
-
-let zipFile = null;
-
+let zipBlob = null;
 
 
 /* =====================================================
    FILE UPLOAD
 ===================================================== */
-
 
 document
 .getElementById("fileInput")
@@ -224,72 +202,60 @@ document
     "change",
     async function(event) {
 
-        const file =
-            event.target.files[0];
-
+        const file = event.target.files[0];
 
         if (!file) {
             return;
         }
 
+        sourceFileName = file.name;
 
         document.getElementById("fileName")
-            .textContent =
-            file.name;
-
+            .textContent = file.name;
 
         document.getElementById("status")
             .textContent =
             "Excel read ho raha hai...";
 
-
         try {
 
-            const buffer =
-                await file.arrayBuffer();
+            /*
+             * ExcelJS workbook
+             */
+
+            sourceWorkbook =
+                new ExcelJS.Workbook();
+
+            await sourceWorkbook.xlsx.load(
+                await file.arrayBuffer()
+            );
 
 
-            workbook =
-                XLSX.read(
-                    buffer,
-                    {
-                        type: "array",
-
-                        cellStyles: true,
-
-                        cellNF: true,
-
-                        cellHTML: true
-                    }
-                );
-
+            /*
+             * Sheet dropdown
+             */
 
             const sheetSelect =
                 document.getElementById(
                     "sheetSelect"
                 );
 
-
-            sheetSelect.innerHTML =
-                "";
+            sheetSelect.innerHTML = "";
 
 
-            workbook.SheetNames.forEach(
-                function(sheetName) {
+            sourceWorkbook.worksheets.forEach(
+                function(worksheet) {
 
                     const option =
                         document.createElement(
                             "option"
                         );
 
-
                     option.value =
-                        sheetName;
-
+                        worksheet.name;
 
                     option.textContent =
-                        sheetName;
-
+                        worksheet.name;
 
                     sheetSelect.appendChild(
                         option
@@ -299,18 +265,26 @@ document
             );
 
 
-            sheetSelect.disabled =
-                false;
+            sheetSelect.disabled = false;
 
 
-            loadSheet(
-                workbook.SheetNames[0]
-            );
+            /*
+             * First sheet
+             */
+
+            if (
+                sourceWorkbook.worksheets.length > 0
+            ) {
+
+                loadSheet(
+                    sourceWorkbook.worksheets[0]
+                );
+
+            }
 
 
-            document.getElementById(
-                "status"
-            ).textContent =
+            document.getElementById("status")
+                .textContent =
                 "Excel loaded successfully.";
 
         }
@@ -319,12 +293,12 @@ document
 
             console.error(error);
 
-            document.getElementById(
-                "status"
-            ).textContent =
+            document.getElementById("status")
+                .textContent =
                 "Excel read nahi ho paya.";
 
             alert(
+                "Excel read karte waqt error aaya:\n\n" +
                 error.message
             );
 
@@ -334,11 +308,9 @@ document
 );
 
 
-
 /* =====================================================
-   LOAD SHEET
+   SHEET CHANGE
 ===================================================== */
-
 
 document
 .getElementById("sheetSelect")
@@ -346,58 +318,31 @@ document
     "change",
     function() {
 
-        loadSheet(
-            this.value
-        );
+        const worksheet =
+            sourceWorkbook.getWorksheet(
+                this.value
+            );
+
+        loadSheet(worksheet);
 
     }
 );
 
 
+/* =====================================================
+   LOAD SHEET
+===================================================== */
 
-function loadSheet(sheetName) {
+function loadSheet(worksheet) {
 
-    currentSheetName =
-        sheetName;
-
-
-    currentWorksheet =
-        workbook.Sheets[
-            sheetName
-        ];
-
-
-    if (!currentWorksheet) {
+    if (!worksheet) {
         return;
     }
 
+    sourceWorksheet = worksheet;
 
-    currentRows =
-        XLSX.utils.sheet_to_json(
-            currentWorksheet,
-            {
-                header: 1,
-                defval: "",
-                raw: false
-            }
-        );
-
-
-    if (
-        !currentRows ||
-        currentRows.length === 0
-    ) {
-
-        document.getElementById(
-            "columnSelect"
-        ).disabled = true;
-
-        return;
-    }
-
-
-    headers =
-        currentRows[0];
+    selectedSheetName =
+        worksheet.name;
 
 
     const columnSelect =
@@ -405,219 +350,250 @@ function loadSheet(sheetName) {
             "columnSelect"
         );
 
-
-    columnSelect.innerHTML =
-        "";
+    columnSelect.innerHTML = "";
 
 
-    headers.forEach(
-        function(header, index) {
+    /*
+     * First row ko header maana jayega
+     */
 
-            let name =
-                String(header).trim();
-
-
-            if (!name) {
-
-                name =
-                    "Column " +
-                    (index + 1);
-
-            }
+    const headerRow =
+        worksheet.getRow(1);
 
 
-            const option =
-                document.createElement(
-                    "option"
-                );
+    let lastColumn =
+        worksheet.actualColumnCount;
 
 
-            option.value =
-                index;
+    if (
+        !lastColumn ||
+        lastColumn < 1
+    ) {
+
+        lastColumn = 1;
+
+    }
 
 
-            option.textContent =
-                name;
+    for (
+        let col = 1;
+        col <= lastColumn;
+        col++
+    ) {
+
+        let header =
+            headerRow.getCell(col).value;
 
 
-            columnSelect.appendChild(
-                option
-            );
+        if (
+            header === null ||
+            header === undefined ||
+            String(header).trim() === ""
+        ) {
+
+            header =
+                "Column " + col;
 
         }
-    );
 
 
-    columnSelect.disabled =
-        false;
+        const option =
+            document.createElement(
+                "option"
+            );
+
+
+        option.value = col;
+
+        option.textContent =
+            String(header);
+
+
+        columnSelect.appendChild(
+            option
+        );
+
+    }
+
+
+    columnSelect.disabled = false;
+
+    document.getElementById(
+        "splitBtn"
+    ).disabled = false;
 
 
     document.getElementById(
         "rowCount"
     ).textContent =
         Math.max(
-            currentRows.length - 1,
+            worksheet.actualRowCount - 1,
             0
         );
 
 }
 
 
-
 /* =====================================================
-   COPY COLUMN WIDTHS
+   GET CELL VALUE AS TEXT
 ===================================================== */
 
+function getCellText(cell) {
 
-function copyColumnWidths(
-    sourceSheet,
-    targetSheet
-) {
+    if (
+        cell === null ||
+        cell === undefined
+    ) {
 
-    if (!sourceSheet["!cols"]) {
-        return;
+        return "";
+
     }
 
 
-    targetSheet["!cols"] =
-        JSON.parse(
-            JSON.stringify(
-                sourceSheet["!cols"]
-            )
-        );
-
-}
+    let value = cell.value;
 
 
+    if (
+        value === null ||
+        value === undefined
+    ) {
 
-/* =====================================================
-   COPY ROW HEIGHTS
-===================================================== */
+        return "";
 
-
-function copyRowHeights(
-    sourceSheet,
-    targetSheet,
-    sourceRows
-) {
-
-    if (!sourceSheet["!rows"]) {
-        return;
     }
 
 
-    targetSheet["!rows"] =
-        [];
+    /*
+     * Formula
+     */
 
-
-    for (
-        let i = 0;
-        i < sourceRows.length;
-        i++
+    if (
+        typeof value === "object" &&
+        value.formula !== undefined
     ) {
 
         if (
-            sourceSheet["!rows"][i]
+            value.result !== undefined &&
+            value.result !== null
         ) {
 
-            targetSheet["!rows"][i] =
-                JSON.parse(
-                    JSON.stringify(
-                        sourceSheet["!rows"][i]
-                    )
-                );
+            return String(value.result)
+                .trim();
 
         }
 
+        return String(value.formula)
+            .trim();
+
     }
+
+
+    /*
+     * Rich text
+     */
+
+    if (
+        typeof value === "object" &&
+        value.richText
+    ) {
+
+        return value.richText
+            .map(
+                item => item.text || ""
+            )
+            .join("")
+            .trim();
+
+    }
+
+
+    /*
+     * Date
+     */
+
+    if (value instanceof Date) {
+
+        return value.toLocaleDateString(
+            "en-IN"
+        );
+
+    }
+
+
+    return String(value).trim();
 
 }
 
 
-
 /* =====================================================
-   COPY CELL STYLE
+   SAFE FILE NAME
 ===================================================== */
 
+function safeFileName(value) {
 
-function copyCellStyle(
+    let name =
+        String(value)
+            .trim()
+            .replace(
+                /[\\\/:*?"<>|]/g,
+                "_"
+            );
+
+
+    if (!name) {
+
+        name = "Blank";
+
+    }
+
+
+    return name;
+
+}
+
+
+/* =====================================================
+   COPY CELL
+   Includes:
+   - Value
+   - Formula
+   - Font
+   - Fill
+   - Border
+   - Alignment
+   - Number format
+   - Protection
+===================================================== */
+
+function copyCell(
     sourceCell,
     targetCell
 ) {
 
-    if (!sourceCell) {
-        return;
-    }
-
-
     /*
-       Value
-    */
+     * Value
+     */
 
     if (
-        sourceCell.v !== undefined
+        sourceCell.value !== undefined
     ) {
 
-        targetCell.v =
-            sourceCell.v;
+        targetCell.value =
+            sourceCell.value;
 
     }
 
 
     /*
-       Formula
-    */
+     * Font
+     */
 
-    if (
-        sourceCell.f !== undefined
-    ) {
+    if (sourceCell.font) {
 
-        targetCell.f =
-            sourceCell.f;
-
-    }
-
-
-    /*
-       Type
-    */
-
-    if (
-        sourceCell.t !== undefined
-    ) {
-
-        targetCell.t =
-            sourceCell.t;
-
-    }
-
-
-    /*
-       Number Format
-    */
-
-    if (
-        sourceCell.z !== undefined
-    ) {
-
-        targetCell.z =
-            sourceCell.z;
-
-    }
-
-
-    /*
-       Style
-    */
-
-    if (
-        sourceCell.s !== undefined
-    ) {
-
-        targetCell.s =
+        targetCell.font =
             JSON.parse(
                 JSON.stringify(
-                    sourceCell.s
+                    sourceCell.font
                 )
             );
 
@@ -625,17 +601,15 @@ function copyCellStyle(
 
 
     /*
-       Hyperlink
-    */
+     * Fill
+     */
 
-    if (
-        sourceCell.l !== undefined
-    ) {
+    if (sourceCell.fill) {
 
-        targetCell.l =
+        targetCell.fill =
             JSON.parse(
                 JSON.stringify(
-                    sourceCell.l
+                    sourceCell.fill
                 )
             );
 
@@ -643,109 +617,256 @@ function copyCellStyle(
 
 
     /*
-       Comment
-    */
+     * Border
+     */
 
-    if (
-        sourceCell.c !== undefined
-    ) {
+    if (sourceCell.border) {
 
-        targetCell.c =
+        targetCell.border =
             JSON.parse(
                 JSON.stringify(
-                    sourceCell.c
+                    sourceCell.border
                 )
             );
+
+    }
+
+
+    /*
+     * Alignment
+     */
+
+    if (sourceCell.alignment) {
+
+        targetCell.alignment =
+            JSON.parse(
+                JSON.stringify(
+                    sourceCell.alignment
+                )
+            );
+
+    }
+
+
+    /*
+     * Number Format
+     */
+
+    if (sourceCell.numFmt) {
+
+        targetCell.numFmt =
+            sourceCell.numFmt;
+
+    }
+
+
+    /*
+     * Protection
+     */
+
+    if (sourceCell.protection) {
+
+        targetCell.protection =
+            JSON.parse(
+                JSON.stringify(
+                    sourceCell.protection
+                )
+            );
+
+    }
+
+
+    /*
+     * Style ID
+     */
+
+    if (
+        sourceCell.style &&
+        sourceCell.style !== 0
+    ) {
+
+        targetCell.style =
+            sourceCell.style;
 
     }
 
 }
-
 
 
 /* =====================================================
-   COPY ORIGINAL ROW
+   COPY COLUMN WIDTH
 ===================================================== */
 
-
-function copyOriginalRow(
-    sourceSheet,
-    targetSheet,
-    sourceRowNumber,
-    targetRowNumber
+function copyColumnWidth(
+    sourceWorksheet,
+    targetWorksheet,
+    columnNumber
 ) {
 
-    const range =
-        sourceSheet["!ref"];
+    const sourceColumn =
+        sourceWorksheet.getColumn(
+            columnNumber
+        );
+
+    const targetColumn =
+        targetWorksheet.getColumn(
+            columnNumber
+        );
 
 
-    if (!range) {
-        return;
+    if (
+        sourceColumn.width !== undefined
+    ) {
+
+        targetColumn.width =
+            sourceColumn.width;
+
     }
 
 
-    const decoded =
-        XLSX.utils.decode_range(
-            range
-        );
+    /*
+     * Hidden column
+     */
 
-
-    for (
-        let col = decoded.s.c;
-        col <= decoded.e.c;
-        col++
+    if (
+        sourceColumn.hidden !== undefined
     ) {
 
-        const sourceAddress =
-            XLSX.utils.encode_cell({
-                r: sourceRowNumber,
-                c: col
-            });
+        targetColumn.hidden =
+            sourceColumn.hidden;
+
+    }
 
 
-        const targetAddress =
-            XLSX.utils.encode_cell({
-                r: targetRowNumber,
-                c: col
-            });
+    /*
+     * Outline level
+     */
 
+    if (
+        sourceColumn.outlineLevel !== undefined
+    ) {
 
-        const sourceCell =
-            sourceSheet[
-                sourceAddress
-            ];
-
-
-        if (!sourceCell) {
-            continue;
-        }
-
-
-        const targetCell =
-            {};
-
-
-        copyCellStyle(
-            sourceCell,
-            targetCell
-        );
-
-
-        targetSheet[
-            targetAddress
-        ] =
-            targetCell;
+        targetColumn.outlineLevel =
+            sourceColumn.outlineLevel;
 
     }
 
 }
 
+
+/* =====================================================
+   COPY ROW HEIGHT
+===================================================== */
+
+function copyRowHeight(
+    sourceRow,
+    targetRow
+) {
+
+    if (
+        sourceRow.height !== undefined
+    ) {
+
+        targetRow.height =
+            sourceRow.height;
+
+    }
+
+
+    if (
+        sourceRow.hidden !== undefined
+    ) {
+
+        targetRow.hidden =
+            sourceRow.hidden;
+
+    }
+
+
+    if (
+        sourceRow.outlineLevel !== undefined
+    ) {
+
+        targetRow.outlineLevel =
+            sourceRow.outlineLevel;
+
+    }
+
+}
+
+
+/* =====================================================
+   COPY MERGED CELLS
+===================================================== */
+
+function copyHeaderMerges(
+    sourceWorksheet,
+    targetWorksheet
+) {
+
+    /*
+     * Header ke merged cells preserve karein
+     */
+
+    sourceWorksheet.model.merges.forEach(
+        function(range) {
+
+            const parts =
+                range.split(":");
+
+            if (parts.length !== 2) {
+                return;
+            }
+
+
+            const start =
+                sourceWorksheet.getCell(
+                    parts[0]
+                );
+
+            const end =
+                sourceWorksheet.getCell(
+                    parts[1]
+                );
+
+
+            /*
+             * Sirf wahi merge preserve karein
+             * jisme header row included hai
+             */
+
+            if (
+                start.row === 1 ||
+                end.row === 1
+            ) {
+
+                try {
+
+                    targetWorksheet.mergeCells(
+                        range
+                    );
+
+                }
+                catch(error) {
+
+                    console.log(
+                        "Merge skipped:",
+                        range
+                    );
+
+                }
+
+            }
+
+        }
+    );
+
+}
 
 
 /* =====================================================
    SPLIT EXCEL
 ===================================================== */
-
 
 document
 .getElementById("splitBtn")
@@ -753,7 +874,7 @@ document
     "click",
     async function() {
 
-        if (!workbook) {
+        if (!sourceWorksheet) {
 
             alert(
                 "Pehle Excel file select karein."
@@ -763,7 +884,7 @@ document
         }
 
 
-        const columnIndex =
+        const columnNumber =
             parseInt(
                 document.getElementById(
                     "columnSelect"
@@ -771,70 +892,50 @@ document
             );
 
 
-        const sourceSheet =
-            currentWorksheet;
-
-
-        const range =
-            sourceSheet["!ref"];
-
-
-        if (!range) {
-
-            alert(
-                "Selected sheet mein data nahi hai."
-            );
-
-            return;
-        }
-
-
-        const decodedRange =
-            XLSX.utils.decode_range(
-                range
-            );
-
-
         /*
-           Unique groups
-        */
+         * Groups
+         */
 
         const groups =
             new Map();
 
 
+        const lastRow =
+            sourceWorksheet.actualRowCount;
+
+
         /*
-           Header row = row 0
-        */
+         * Data rows
+         * Row 1 = Header
+         */
 
         for (
-            let rowIndex = 1;
-            rowIndex < currentRows.length;
-            rowIndex++
+            let rowNumber = 2;
+            rowNumber <= lastRow;
+            rowNumber++
         ) {
 
             const row =
-                currentRows[rowIndex];
+                sourceWorksheet.getRow(
+                    rowNumber
+                );
+
+
+            const cell =
+                row.getCell(
+                    columnNumber
+                );
 
 
             let value =
-                row[columnIndex];
+                getCellText(cell);
 
 
-            if (
-                value === undefined ||
-                value === null ||
-                String(value).trim() === ""
-            ) {
+            if (!value) {
 
-                value =
-                    "Blank";
+                value = "Blank";
 
             }
-
-
-            value =
-                String(value).trim();
 
 
             if (!groups.has(value)) {
@@ -849,7 +950,7 @@ document
 
             groups
                 .get(value)
-                .push(rowIndex);
+                .push(rowNumber);
 
         }
 
@@ -870,231 +971,387 @@ document
             groups.size;
 
 
+        document.getElementById(
+            "status"
+        ).textContent =
+            "Split ho raha hai...";
+
+
         const zip =
             new JSZip();
 
 
-        let counter = 0;
+        let fileCounter = 0;
 
 
         /*
-           Har unique value ke liye
-           ek Excel file
-        */
+         * Har group ke liye Excel
+         */
 
         for (
             const [
                 groupValue,
-                rowIndexes
-            ]
-            of groups
+                rowNumbers
+            ] of groups
         ) {
 
             /*
-               New worksheet
-            */
-
-            const targetSheet =
-                {};
-
-
-            /*
-               Header + matching rows
-            */
-
-            const outputRows = [
-                0,
-                ...rowIndexes
-            ];
-
-
-            /*
-               Original cells copy
-            */
-
-            outputRows.forEach(
-                function(
-                    sourceRow,
-                    targetRow
-                ) {
-
-                    copyOriginalRow(
-                        sourceSheet,
-                        targetSheet,
-                        sourceRow,
-                        targetRow
-                    );
-
-                }
-            );
-
-
-            /*
-               Range
-            */
-
-            targetSheet["!ref"] =
-                XLSX.utils.encode_range({
-
-                    s: {
-                        r: 0,
-                        c: decodedRange.s.c
-                    },
-
-                    e: {
-                        r:
-                            outputRows.length - 1,
-
-                        c:
-                            decodedRange.e.c
-                    }
-
-                });
-
-
-            /*
-               Column Width copy
-            */
-
-            copyColumnWidths(
-                sourceSheet,
-                targetSheet
-            );
-
-
-            /*
-               Row Height copy
-            */
-
-            copyRowHeights(
-                sourceSheet,
-                targetSheet,
-                outputRows
-            );
-
-
-            /*
-               Merged cells
-               Header merge preserve
-            */
-
-            if (
-                sourceSheet["!merges"]
-            ) {
-
-                targetSheet["!merges"] =
-                    [];
-
-
-                sourceSheet["!merges"]
-                    .forEach(
-                        function(merge) {
-
-                            /*
-                               Sirf wahi merges
-                               preserve karein jo
-                               header row mein hain
-                            */
-
-                            if (
-                                merge.s.r === 0
-                            ) {
-
-                                const newMerge =
-                                    JSON.parse(
-                                        JSON.stringify(
-                                            merge
-                                        )
-                                    );
-
-
-                                targetSheet[
-                                    "!merges"
-                                ].push(
-                                    newMerge
-                                );
-
-                            }
-
-                        }
-                    );
-
-            }
-
-
-            /*
-               New workbook
-            */
+             * New workbook
+             */
 
             const newWorkbook =
-                XLSX.utils.book_new();
-
-
-            XLSX.utils.book_append_sheet(
-                newWorkbook,
-                targetSheet,
-                "Sheet1"
-            );
+                new ExcelJS.Workbook();
 
 
             /*
-               Excel file
-            */
+             * Workbook properties
+             */
 
-            const excelBuffer =
-                XLSX.write(
-                    newWorkbook,
-                    {
-                        bookType: "xlsx",
-                        type: "array",
-                        cellStyles: true
-                    }
+            newWorkbook.creator =
+                sourceWorkbook.creator || "";
+
+            newWorkbook.lastModifiedBy =
+                sourceWorkbook.lastModifiedBy || "";
+
+            newWorkbook.created =
+                sourceWorkbook.created;
+
+            newWorkbook.modified =
+                sourceWorkbook.modified;
+
+
+            /*
+             * New sheet
+             */
+
+            const newWorksheet =
+                newWorkbook.addWorksheet(
+                    selectedSheetName
                 );
 
 
             /*
-               Safe filename
-            */
+             * Page setup copy
+             */
 
-            let safeName =
-                String(groupValue)
-                    .replace(
-                        /[\\\/:*?"<>|]/g,
-                        "_"
-                    )
-                    .trim();
+            if (
+                sourceWorksheet.pageSetup
+            ) {
 
-
-            if (!safeName) {
-
-                safeName =
-                    "Blank";
+                newWorksheet.pageSetup =
+                    JSON.parse(
+                        JSON.stringify(
+                            sourceWorksheet.pageSetup
+                        )
+                    );
 
             }
 
 
-            zip.file(
-                safeName + ".xlsx",
-                excelBuffer
+            /*
+             * Views copy
+             */
+
+            if (
+                sourceWorksheet.views
+            ) {
+
+                newWorksheet.views =
+                    JSON.parse(
+                        JSON.stringify(
+                            sourceWorksheet.views
+                        )
+                    );
+
+            }
+
+
+            /*
+             * Properties
+             */
+
+            if (
+                sourceWorksheet.properties
+            ) {
+
+                newWorksheet.properties =
+                    JSON.parse(
+                        JSON.stringify(
+                            sourceWorksheet.properties
+                        )
+                    );
+
+            }
+
+
+            /*
+             * Column widths
+             */
+
+            const lastColumn =
+                sourceWorksheet.actualColumnCount;
+
+
+            for (
+                let col = 1;
+                col <= lastColumn;
+                col++
+            ) {
+
+                copyColumnWidth(
+                    sourceWorksheet,
+                    newWorksheet,
+                    col
+                );
+
+            }
+
+
+            /*
+             * Header row copy
+             */
+
+            const sourceHeader =
+                sourceWorksheet.getRow(1);
+
+
+            const targetHeader =
+                newWorksheet.getRow(1);
+
+
+            copyRowHeight(
+                sourceHeader,
+                targetHeader
             );
 
 
-            counter++;
+            for (
+                let col = 1;
+                col <= lastColumn;
+                col++
+            ) {
+
+                copyCell(
+                    sourceHeader.getCell(col),
+                    targetHeader.getCell(col)
+                );
+
+            }
+
+
+            /*
+             * Data rows copy
+             */
+
+            let targetRowNumber = 2;
+
+
+            for (
+                const sourceRowNumber
+                of rowNumbers
+            ) {
+
+                const sourceRow =
+                    sourceWorksheet.getRow(
+                        sourceRowNumber
+                    );
+
+
+                const targetRow =
+                    newWorksheet.getRow(
+                        targetRowNumber
+                    );
+
+
+                /*
+                 * Row height
+                 */
+
+                copyRowHeight(
+                    sourceRow,
+                    targetRow
+                );
+
+
+                /*
+                 * All columns
+                 */
+
+                for (
+                    let col = 1;
+                    col <= lastColumn;
+                    col++
+                ) {
+
+                    const sourceCell =
+                        sourceRow.getCell(
+                            col
+                        );
+
+
+                    const targetCell =
+                        targetRow.getCell(
+                            col
+                        );
+
+
+                    copyCell(
+                        sourceCell,
+                        targetCell
+                    );
+
+                }
+
+
+                targetRowNumber++;
+
+            }
+
+
+            /*
+             * Header merges
+             */
+
+            copyHeaderMerges(
+                sourceWorksheet,
+                newWorksheet
+            );
+
+
+            /*
+             * Auto filter
+             */
+
+            if (
+                sourceWorksheet.autoFilter
+            ) {
+
+                try {
+
+                    newWorksheet.autoFilter =
+                        {
+                            from:
+                                sourceWorksheet
+                                .autoFilter
+                                .from,
+
+                            to:
+                                sourceWorksheet
+                                .autoFilter
+                                .to
+                        };
+
+                }
+                catch(error) {
+
+                    console.log(
+                        "AutoFilter skipped"
+                    );
+
+                }
+
+            }
+
+
+            /*
+             * Freeze panes
+             */
+
+            if (
+                sourceWorksheet.views &&
+                sourceWorksheet.views.length
+            ) {
+
+                try {
+
+                    const view =
+                        sourceWorksheet.views[0];
+
+                    if (
+                        view.state ===
+                        "frozen"
+                    ) {
+
+                        newWorksheet.views = [
+                            {
+                                state: "frozen",
+
+                                xSplit:
+                                    view.xSplit || 0,
+
+                                ySplit:
+                                    view.ySplit || 0,
+
+                                topLeftCell:
+                                    view.topLeftCell,
+
+                                activeCell:
+                                    view.activeCell,
+
+                                showGridLines:
+                                    view.showGridLines
+                            }
+                        ];
+
+                    }
+
+                }
+                catch(error) {
+
+                    console.log(
+                        "Freeze panes skipped"
+                    );
+
+                }
+
+            }
+
+
+            /*
+             * ExcelJS ko XLSX buffer mein convert
+             */
+
+            const buffer =
+                await newWorkbook.xlsx.writeBuffer();
+
+
+            /*
+             * Safe filename
+             */
+
+            const filename =
+                safeFileName(
+                    groupValue
+                ) +
+                ".xlsx";
+
+
+            /*
+             * ZIP mein add
+             */
+
+            zip.file(
+                filename,
+                buffer
+            );
+
+
+            fileCounter++;
 
 
             document.getElementById(
                 "status"
             ).textContent =
                 "Processing " +
-                counter +
+                fileCounter +
                 " / " +
                 groups.size +
                 "...";
 
 
             /*
-               Browser responsive
-            */
+             * Browser ko breathing time
+             */
 
             await new Promise(
                 resolve =>
@@ -1108,26 +1365,23 @@ document
 
 
         /*
-           ZIP create
-        */
+         * ZIP generate
+         */
 
-        zipFile =
+        document.getElementById(
+            "status"
+        ).textContent =
+            "ZIP ban raha hai...";
+
+
+        zipBlob =
             await zip.generateAsync(
                 {
-                    type: "blob"
-                },
-
-                function(metadata) {
-
-                    document.getElementById(
-                        "status"
-                    ).textContent =
-                        "ZIP preparing: " +
-                        Math.round(
-                            metadata.percent
-                        ) +
-                        "%";
-
+                    type: "blob",
+                    compression: "DEFLATE",
+                    compressionOptions: {
+                        level: 6
+                    }
                 }
             );
 
@@ -1143,17 +1397,15 @@ document
         ).textContent =
             "Completed! " +
             groups.size +
-            " files ready.";
+            " Excel files ready.";
 
     }
 );
 
 
-
 /* =====================================================
    DOWNLOAD ZIP
 ===================================================== */
-
 
 document
 .getElementById("downloadBtn")
@@ -1161,7 +1413,7 @@ document
     "click",
     function() {
 
-        if (!zipFile) {
+        if (!zipBlob) {
 
             alert(
                 "Pehle Excel split karein."
@@ -1173,7 +1425,7 @@ document
 
         const url =
             URL.createObjectURL(
-                zipFile
+                zipBlob
             );
 
 
@@ -1183,9 +1435,7 @@ document
             );
 
 
-        link.href =
-            url;
-
+        link.href = url;
 
         link.download =
             "Split_Excel_Files.zip";
@@ -1217,7 +1467,6 @@ document
 
     }
 );
-
 
 </script>
 
