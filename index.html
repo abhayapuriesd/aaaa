@@ -1,11 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
 
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<title>Excel Splitter - DTR</title>
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
+
+<title>Excel Splitter</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
@@ -19,7 +22,7 @@ body {
 }
 
 .container {
-    max-width: 850px;
+    max-width: 900px;
     margin: auto;
     background: white;
     padding: 30px;
@@ -29,6 +32,7 @@ body {
 
 h1 {
     margin-top: 0;
+    color: #222;
 }
 
 .upload-box {
@@ -46,7 +50,8 @@ input[type="file"] {
 select {
     padding: 10px;
     margin: 10px;
-    min-width: 250px;
+    min-width: 260px;
+    font-size: 15px;
 }
 
 button {
@@ -74,11 +79,6 @@ button:disabled {
     cursor: not-allowed;
 }
 
-#status {
-    margin-top: 20px;
-    font-weight: bold;
-}
-
 .info {
     background: #f1f3f4;
     padding: 15px;
@@ -90,22 +90,24 @@ button:disabled {
     margin: 6px 0;
 }
 
-.success {
-    margin-top: 15px;
-    padding: 12px;
-    background: #e8f5e9;
-    border-radius: 7px;
+#status {
+    margin-top: 20px;
+    font-weight: bold;
+    line-height: 1.5;
 }
 
 </style>
 
 </head>
 
+
 <body>
+
 
 <div class="container">
 
 <h1>Excel Splitter</h1>
+
 
 <div class="upload-box">
 
@@ -117,31 +119,56 @@ button:disabled {
 
     <br>
 
+
     <label>
         <b>Sheet:</b>
     </label>
 
-    <select id="sheetSelect" disabled>
-        <option>Select Excel first</option>
+    <select
+        id="sheetSelect"
+        disabled
+    >
+
+        <option>
+            Select Excel first
+        </option>
+
     </select>
 
+
     <br>
+
 
     <label>
         <b>Split By:</b>
     </label>
 
-    <select id="columnSelect" disabled>
-        <option>Select Sheet first</option>
+    <select
+        id="columnSelect"
+        disabled
+    >
+
+        <option>
+            Select Sheet first
+        </option>
+
     </select>
+
 
     <br>
 
-    <button id="splitBtn" disabled>
+
+    <button
+        id="splitBtn"
+        disabled
+    >
         Split Excel
     </button>
 
-    <button id="downloadBtn">
+
+    <button
+        id="downloadBtn"
+    >
         Download ZIP
     </button>
 
@@ -175,10 +202,12 @@ button:disabled {
 
 <div id="status"></div>
 
+
 </div>
 
 
 <script>
+
 
 /*
 =========================================================
@@ -188,29 +217,69 @@ GLOBAL VARIABLES
 
 let originalZip = null;
 
-let workbookXML = null;
-
-let sheetXML = null;
-
 let selectedSheetName = "";
 
 let selectedSheetPath = "";
-
-let selectedColumn = null;
 
 let generatedZIP = null;
 
 
 /*
 =========================================================
-HELPER
+NAMESPACE
+=========================================================
+*/
+
+const MAIN_NS =
+    "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+
+/*
+=========================================================
+PARSE XML
+=========================================================
+*/
+
+function parseXML(text) {
+
+    return new DOMParser()
+        .parseFromString(
+            text,
+            "application/xml"
+        );
+
+}
+
+
+/*
+=========================================================
+SERIALIZE XML
+=========================================================
+*/
+
+function serializeXML(xml) {
+
+    return new XMLSerializer()
+        .serializeToString(xml);
+
+}
+
+
+/*
+=========================================================
+CLEAN TEXT
 =========================================================
 */
 
 function cleanText(value) {
 
-    if (value === null || value === undefined) {
+    if (
+        value === null ||
+        value === undefined
+    ) {
+
         return "";
+
     }
 
     return String(value).trim();
@@ -220,129 +289,80 @@ function cleanText(value) {
 
 /*
 =========================================================
-XML PARSER
+COLUMN LETTER → NUMBER
+
+A = 1
+B = 2
+Z = 26
+AA = 27
 =========================================================
 */
 
-function parseXML(text) {
-
-    return new DOMParser().parseFromString(
-        text,
-        "application/xml"
-    );
-
-}
-
-
-/*
-=========================================================
-XML SERIALIZER
-=========================================================
-*/
-
-function serializeXML(xml) {
-
-    return new XMLSerializer().serializeToString(xml);
-
-}
-
-
-/*
-=========================================================
-READ CELL VALUE
-
-Handles:
-- inlineStr
-- shared strings
-- normal numeric/text values
-=========================================================
-*/
-
-async function getCellValue(
-    cell,
-    sharedStrings
+function columnLetterToNumber(
+    letters
 ) {
 
-    if (!cell) {
-        return "";
-    }
+    let number = 0;
 
 
-    const type =
-        cell.getAttribute("t");
-
-
-    /*
-    inline string
-    */
-
-    if (type === "inlineStr") {
-
-        const nodes =
-            cell.getElementsByTagNameNS(
-                "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-                "t"
-            );
-
-        let text = "";
-
-        for (const node of nodes) {
-            text += node.textContent;
-        }
-
-        return cleanText(text);
-
-    }
-
-
-    /*
-    normal value
-    */
-
-    const v =
-        cell.getElementsByTagNameNS(
-            "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-            "v"
-        )[0];
-
-
-    if (!v) {
-        return "";
-    }
-
-
-    let value =
-        v.textContent;
-
-
-    /*
-    Shared string
-    */
-
-    if (
-        type === "s" &&
-        sharedStrings
+    for (
+        let i = 0;
+        i < letters.length;
+        i++
     ) {
 
-        const index =
-            parseInt(value, 10);
-
-
-        if (
-            !isNaN(index) &&
-            sharedStrings[index] !== undefined
-        ) {
-
-            return cleanText(
-                sharedStrings[index]
+        number =
+            number * 26 +
+            (
+                letters.charCodeAt(i) -
+                64
             );
-
-        }
 
     }
 
 
-    return cleanText(value);
+    return number;
+
+}
+
+
+/*
+=========================================================
+CELL REFERENCE → COLUMN NUMBER
+
+A1 → 1
+L5 → 12
+AA20 → 27
+=========================================================
+*/
+
+function getCellColumn(
+    reference
+) {
+
+    if (!reference) {
+
+        return null;
+
+    }
+
+
+    const match =
+        reference.match(
+            /^([A-Z]+)/
+        );
+
+
+    if (!match) {
+
+        return null;
+
+    }
+
+
+    return columnLetterToNumber(
+        match[1]
+    );
 
 }
 
@@ -364,54 +384,64 @@ async function readSharedStrings(
 
 
     if (!file) {
+
         return [];
+
     }
 
 
     const text =
-        await file.async("text");
+        await file.async(
+            "text"
+        );
 
 
     const xml =
         parseXML(text);
 
 
-    const ns =
-        "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-
-
-    const siNodes =
-        xml.getElementsByTagNameNS(
-            ns,
-            "si"
+    const nodes =
+        Array.from(
+            xml.getElementsByTagNameNS(
+                MAIN_NS,
+                "si"
+            )
         );
 
 
     const result = [];
 
 
-    for (const si of siNodes) {
+    for (
+        const si
+        of nodes
+    ) {
 
-        const tNodes =
-            si.getElementsByTagNameNS(
-                ns,
-                "t"
+        const textNodes =
+            Array.from(
+                si.getElementsByTagNameNS(
+                    MAIN_NS,
+                    "t"
+                )
             );
 
 
-        let textValue = "";
+        let value = "";
 
 
-        for (const t of tNodes) {
+        for (
+            const t
+            of textNodes
+        ) {
 
-            textValue +=
+            value +=
                 t.textContent;
 
         }
 
 
         result.push(
-            textValue
+            value
         );
 
     }
@@ -424,7 +454,129 @@ async function readSharedStrings(
 
 /*
 =========================================================
+GET CELL VALUE
+=========================================================
+*/
+
+async function getCellValue(
+    cell,
+    sharedStrings
+) {
+
+    if (!cell) {
+
+        return "";
+
+    }
+
+
+    const type =
+        cell.getAttribute("t");
+
+
+    /*
+    INLINE STRING
+    */
+
+    if (
+        type ===
+        "inlineStr"
+    ) {
+
+        const textNodes =
+            Array.from(
+                cell.getElementsByTagNameNS(
+                    MAIN_NS,
+                    "t"
+                )
+            );
+
+
+        let value = "";
+
+
+        for (
+            const node
+            of textNodes
+        ) {
+
+            value +=
+                node.textContent;
+
+        }
+
+
+        return cleanText(
+            value
+        );
+
+    }
+
+
+    /*
+    NORMAL VALUE
+    */
+
+    const valueNode =
+        cell.getElementsByTagNameNS(
+            MAIN_NS,
+            "v"
+        )[0];
+
+
+    if (!valueNode) {
+
+        return "";
+
+    }
+
+
+    let value =
+        valueNode.textContent;
+
+
+    /*
+    SHARED STRING
+    */
+
+    if (
+        type === "s"
+    ) {
+
+        const index =
+            parseInt(
+                value,
+                10
+            );
+
+
+        if (
+            !isNaN(index) &&
+            sharedStrings[index] !== undefined
+        ) {
+
+            value =
+                sharedStrings[index];
+
+        }
+
+    }
+
+
+    return cleanText(
+        value
+    );
+
+}
+
+
+/*
+=========================================================
 GET WORKBOOK SHEETS
+
+IMPORTANT:
+sheets ko Array mein convert kiya gaya hai.
+Isse .find() error nahi aayega.
 =========================================================
 */
 
@@ -439,40 +591,47 @@ async function getWorkbookSheets(
 
 
     if (!workbookFile) {
+
         throw new Error(
             "workbook.xml nahi mila."
         );
+
     }
 
 
     const text =
-        await workbookFile.async("text");
+        await workbookFile.async(
+            "text"
+        );
 
 
     const xml =
         parseXML(text);
 
 
-    const ns =
-        "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-
-
     const sheets =
-        xml.getElementsByTagNameNS(
-            ns,
-            "sheet"
+        Array.from(
+            xml.getElementsByTagNameNS(
+                MAIN_NS,
+                "sheet"
+            )
         );
 
 
     const result = [];
 
 
-    for (const sheet of sheets) {
+    for (
+        const sheet
+        of sheets
+    ) {
 
         result.push({
 
             name:
-                sheet.getAttribute("name"),
+                sheet.getAttribute(
+                    "name"
+                ),
 
             rid:
                 sheet.getAttribute(
@@ -485,8 +644,11 @@ async function getWorkbookSheets(
 
 
     return {
-        xml,
-        sheets
+
+        xml: xml,
+
+        sheets: result
+
     };
 
 }
@@ -494,7 +656,7 @@ async function getWorkbookSheets(
 
 /*
 =========================================================
-FIND SHEET FILE PATH
+FIND SHEET PATH
 =========================================================
 */
 
@@ -512,27 +674,34 @@ async function findSheetPath(
     if (!relFile) {
 
         throw new Error(
-            "workbook relationships nahi mile."
+            "workbook.xml.rels nahi mila."
         );
 
     }
 
 
     const text =
-        await relFile.async("text");
+        await relFile.async(
+            "text"
+        );
 
 
     const xml =
         parseXML(text);
 
 
-    const rels =
-        xml.getElementsByTagName(
-            "Relationship"
+    const relationships =
+        Array.from(
+            xml.getElementsByTagName(
+                "Relationship"
+            )
         );
 
 
-    for (const rel of rels) {
+    for (
+        const rel
+        of relationships
+    ) {
 
         if (
             rel.getAttribute("Id") ===
@@ -545,22 +714,29 @@ async function findSheetPath(
                 );
 
 
+            if (!target) {
+
+                return null;
+
+            }
+
+
+            /*
+            Normalize path
+            */
+
+            target =
+                target.replace(
+                    /^\/+/,
+                    ""
+                );
+
+
             if (
-                target.startsWith("/")
+                !target.startsWith(
+                    "xl/"
+                )
             ) {
-
-                target =
-                    target.substring(1);
-
-            }
-            else if (
-                target.startsWith("xl/")
-            ) {
-
-                // already correct
-
-            }
-            else {
 
                 target =
                     "xl/" + target;
@@ -582,67 +758,7 @@ async function findSheetPath(
 
 /*
 =========================================================
-COLUMN LETTER → NUMBER
-=========================================================
-*/
-
-function columnLetterToNumber(
-    letters
-) {
-
-    let number = 0;
-
-    for (
-        let i = 0;
-        i < letters.length;
-        i++
-    ) {
-
-        number =
-            number * 26 +
-            (
-                letters.charCodeAt(i) -
-                64
-            );
-
-    }
-
-    return number;
-
-}
-
-
-/*
-=========================================================
-CELL REFERENCE COLUMN
-=========================================================
-*/
-
-function getCellColumn(
-    reference
-) {
-
-    const match =
-        reference.match(
-            /^([A-Z]+)/
-        );
-
-
-    if (!match) {
-        return null;
-    }
-
-
-    return columnLetterToNumber(
-        match[1]
-    );
-
-}
-
-
-/*
-=========================================================
-LOAD EXCEL
+FILE UPLOAD
 =========================================================
 */
 
@@ -657,7 +773,9 @@ document
 
 
         if (!file) {
+
             return;
+
         }
 
 
@@ -669,9 +787,17 @@ document
                 "Excel read ho raha hai...";
 
 
+            /*
+            Read file
+            */
+
             const buffer =
                 await file.arrayBuffer();
 
+
+            /*
+            Load XLSX as ZIP
+            */
 
             originalZip =
                 await JSZip.loadAsync(
@@ -679,15 +805,19 @@ document
                 );
 
 
+            /*
+            Workbook sheets
+            */
+
             const workbookData =
                 await getWorkbookSheets(
                     originalZip
                 );
 
 
-            workbookXML =
-                workbookData.xml;
-
+            /*
+            Sheet dropdown
+            */
 
             const sheetSelect =
                 document.getElementById(
@@ -730,18 +860,27 @@ document
 
 
             /*
-            Prefer Sheet3
+            Automatically select Sheet3
             */
 
             let defaultSheet =
                 workbookData.sheets.find(
-                    s =>
-                        s.name
-                            .toLowerCase() ===
-                        "sheet3"
-                            .toLowerCase()
+                    function(sheet) {
+
+                        return (
+                            sheet.name
+                                .toLowerCase() ===
+                            "sheet3"
+                        );
+
+                    }
                 );
 
+
+            /*
+            If Sheet3 doesn't exist,
+            first sheet
+            */
 
             if (!defaultSheet) {
 
@@ -751,9 +890,22 @@ document
             }
 
 
+            if (!defaultSheet) {
+
+                throw new Error(
+                    "Excel mein koi sheet nahi mili."
+                );
+
+            }
+
+
             sheetSelect.value =
                 defaultSheet.name;
 
+
+            /*
+            Load Sheet3
+            */
 
             await loadSelectedSheet(
                 defaultSheet.name
@@ -769,7 +921,7 @@ document
             document.getElementById(
                 "status"
             ).textContent =
-                "Excel loaded successfully.";
+                "Excel successfully loaded.";
 
         }
 
@@ -777,15 +929,17 @@ document
 
             console.error(error);
 
-            alert(
-                "Excel read nahi ho paya:\n\n" +
-                error.message
-            );
 
             document.getElementById(
                 "status"
             ).textContent =
                 "Error.";
+
+
+            alert(
+                "Excel read nahi ho paya:\n\n" +
+                error.message
+            );
 
         }
 
@@ -805,9 +959,23 @@ document
     "change",
     async function() {
 
-        await loadSelectedSheet(
-            this.value
-        );
+        try {
+
+            await loadSelectedSheet(
+                this.value
+            );
+
+        }
+
+        catch(error) {
+
+            console.error(error);
+
+            alert(
+                error.message
+            );
+
+        }
 
     }
 );
@@ -827,17 +995,30 @@ async function loadSelectedSheet(
         sheetName;
 
 
+    /*
+    Get workbook sheets
+    */
+
     const workbookData =
         await getWorkbookSheets(
             originalZip
         );
 
 
+    /*
+    Find selected sheet
+    */
+
     const sheet =
         workbookData.sheets.find(
-            s =>
-                s.name ===
-                sheetName
+            function(item) {
+
+                return (
+                    item.name ===
+                    sheetName
+                );
+
+            }
         );
 
 
@@ -851,6 +1032,10 @@ async function loadSelectedSheet(
     }
 
 
+    /*
+    Find XML path
+    */
+
     selectedSheetPath =
         await findSheetPath(
             originalZip,
@@ -861,16 +1046,30 @@ async function loadSelectedSheet(
     if (!selectedSheetPath) {
 
         throw new Error(
-            "Sheet XML nahi mila."
+            "Selected sheet ka XML nahi mila."
         );
 
     }
 
 
+    /*
+    Read sheet XML
+    */
+
     const sheetFile =
         originalZip.file(
             selectedSheetPath
         );
+
+
+    if (!sheetFile) {
+
+        throw new Error(
+            "Sheet file nahi mili:\n" +
+            selectedSheetPath
+        );
+
+    }
 
 
     const text =
@@ -879,7 +1078,7 @@ async function loadSelectedSheet(
         );
 
 
-    sheetXML =
+    const sheetXML =
         parseXML(text);
 
 
@@ -894,16 +1093,12 @@ async function loadSelectedSheet(
 
 
     /*
-    Find first row
+    Sheet data
     */
-
-    const ns =
-        "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-
 
     const sheetData =
         sheetXML.getElementsByTagNameNS(
-            ns,
+            MAIN_NS,
             "sheetData"
         )[0];
 
@@ -917,10 +1112,16 @@ async function loadSelectedSheet(
     }
 
 
+    /*
+    Rows
+    */
+
     const rows =
-        sheetData.getElementsByTagNameNS(
-            ns,
-            "row"
+        Array.from(
+            sheetData.getElementsByTagNameNS(
+                MAIN_NS,
+                "row"
+            )
         );
 
 
@@ -941,10 +1142,12 @@ async function loadSelectedSheet(
         rows[0];
 
 
-    const cells =
-        headerRow.getElementsByTagNameNS(
-            ns,
-            "c"
+    const headerCells =
+        Array.from(
+            headerRow.getElementsByTagNameNS(
+                MAIN_NS,
+                "c"
+            )
         );
 
 
@@ -959,17 +1162,31 @@ async function loadSelectedSheet(
 
 
     /*
-    Read all header cells
+    Header columns
     */
 
-    for (const cell of cells) {
+    for (
+        const cell
+        of headerCells
+    ) {
 
-        const ref =
-            cell.getAttribute("r");
+        const reference =
+            cell.getAttribute(
+                "r"
+            );
 
 
         const column =
-            getCellColumn(ref);
+            getCellColumn(
+                reference
+            );
+
+
+        if (!column) {
+
+            continue;
+
+        }
 
 
         const value =
@@ -1002,10 +1219,11 @@ async function loadSelectedSheet(
 
 
     /*
-    Automatically choose DTR No.
+    Find DTR No.
     */
 
-    let dtrOption = null;
+    let dtrFound =
+        false;
 
 
     for (
@@ -1013,7 +1231,7 @@ async function loadSelectedSheet(
         of columnSelect.options
     ) {
 
-        const text =
+        const normalized =
             option.textContent
                 .toLowerCase()
                 .replace(
@@ -1023,12 +1241,17 @@ async function loadSelectedSheet(
 
 
         if (
-            text.includes("dtrno") ||
-            text === "dtr"
+            normalized === "dtrno" ||
+            normalized.includes("dtrno")
         ) {
 
-            dtrOption =
-                option;
+            columnSelect.value =
+                option.value;
+
+
+            dtrFound =
+                true;
+
 
             break;
 
@@ -1038,16 +1261,11 @@ async function loadSelectedSheet(
 
 
     /*
-    Your Sheet3 has DTR No. in Column L.
+    Your Sheet3:
+    DTR No. = Column L = 12
     */
 
-    if (dtrOption) {
-
-        columnSelect.value =
-            dtrOption.value;
-
-    }
-    else {
+    if (!dtrFound) {
 
         columnSelect.value =
             "12";
@@ -1084,7 +1302,39 @@ async function loadSelectedSheet(
 
 /*
 =========================================================
-SPLIT
+SAFE FILE NAME
+=========================================================
+*/
+
+function safeFileName(
+    value
+) {
+
+    let name =
+        String(value)
+            .replace(
+                /[\\\/:*?"<>|]/g,
+                "_"
+            )
+            .trim();
+
+
+    if (!name) {
+
+        name =
+            "Blank";
+
+    }
+
+
+    return name;
+
+}
+
+
+/*
+=========================================================
+SPLIT EXCEL
 =========================================================
 */
 
@@ -1094,10 +1344,7 @@ document
     "click",
     async function() {
 
-        if (
-            !originalZip ||
-            !sheetXML
-        ) {
+        if (!originalZip) {
 
             alert(
                 "Pehle Excel upload karein."
@@ -1130,185 +1377,20 @@ document
         }
 
 
-        document.getElementById(
-            "status"
-        ).textContent =
-            "DTR values read ho rahe hain...";
-
-
-        const ns =
-            "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-
-
-        const sharedStrings =
-            await readSharedStrings(
-                originalZip
-            );
-
-
-        const sheetData =
-            sheetXML.getElementsByTagNameNS(
-                ns,
-                "sheetData"
-            )[0];
-
-
-        const rows =
-            Array.from(
-                sheetData.getElementsByTagNameNS(
-                    ns,
-                    "row"
-                )
-            );
-
-
-        /*
-        First row = header
-        */
-
-        const groups =
-            new Map();
-
-
-        /*
-        Read DTR from each row
-        */
-
-        for (
-            let i = 1;
-            i < rows.length;
-            i++
-        ) {
-
-            const row =
-                rows[i];
-
-
-            const cells =
-                row.getElementsByTagNameNS(
-                    ns,
-                    "c"
-                );
-
-
-            let dtrValue = "";
-
-
-            for (const cell of cells) {
-
-                const ref =
-                    cell.getAttribute("r");
-
-
-                const column =
-                    getCellColumn(ref);
-
-
-                if (
-                    column ===
-                    columnNumber
-                ) {
-
-                    dtrValue =
-                        await getCellValue(
-                            cell,
-                            sharedStrings
-                        );
-
-                    break;
-
-                }
-
-            }
-
-
-            dtrValue =
-                cleanText(
-                    dtrValue
-                );
-
-
-            if (!dtrValue) {
-
-                dtrValue =
-                    "Blank";
-
-            }
-
-
-            if (!groups.has(
-                dtrValue
-            )) {
-
-                groups.set(
-                    dtrValue,
-                    []
-                );
-
-            }
-
-
-            groups
-                .get(dtrValue)
-                .push(row);
-
-        }
-
-
-        document.getElementById(
-            "fileCount"
-        ).textContent =
-            groups.size;
-
-
-        /*
-        ================================================
-        CREATE ZIP
-        ================================================
-        */
-
-        const zip =
-            new JSZip();
-
-
-        let counter = 0;
-
-
-        for (
-            const [
-                dtr,
-                matchingRows
-            ]
-            of groups
-        ) {
+        try {
 
             document.getElementById(
                 "status"
             ).textContent =
-                "Creating " +
-                dtr +
-                " ...";
+                "DTR data read ho raha hai...";
 
 
             /*
-            Clone original XLSX
-            */
-
-            const newZip =
-                await JSZip.loadAsync(
-                    await originalZip
-                        .generateAsync({
-                            type: "arraybuffer"
-                        })
-                );
-
-
-            /*
-            Get original sheet XML
+            Read original sheet
             */
 
             const sheetFile =
-                newZip.file(
+                originalZip.file(
                     selectedSheetPath
                 );
 
@@ -1319,239 +1401,436 @@ document
                 );
 
 
-            const newSheetXML =
+            const originalSheetXML =
                 parseXML(
                     sheetText
                 );
 
 
-            const newSheetData =
-                newSheetXML
+            const sheetData =
+                originalSheetXML
                     .getElementsByTagNameNS(
-                        ns,
+                        MAIN_NS,
                         "sheetData"
                     )[0];
 
 
-            /*
-            Remove all data rows
-            but keep header row
-            */
-
-            const allRows =
+            const rows =
                 Array.from(
-                    newSheetData
+                    sheetData
                         .getElementsByTagNameNS(
-                            ns,
+                            MAIN_NS,
                             "row"
                         )
                 );
 
 
-            for (
-                let i = 1;
-                i < allRows.length;
-                i++
-            ) {
-
-                newSheetData.removeChild(
-                    allRows[i]
+            const sharedStrings =
+                await readSharedStrings(
+                    originalZip
                 );
-
-            }
 
 
             /*
-            Add matching original rows
+            =========================================
+            GROUP ROWS BY DTR
+            =========================================
             */
 
-            let newRowNumber =
-                2;
+            const groups =
+                new Map();
 
 
             for (
-                const originalRow
-                of matchingRows
+                let i = 1;
+                i < rows.length;
+                i++
             ) {
 
-                const importedRow =
-                    newSheetXML.importNode(
-                        originalRow,
-                        true
+                const row =
+                    rows[i];
+
+
+                const cells =
+                    Array.from(
+                        row.getElementsByTagNameNS(
+                            MAIN_NS,
+                            "c"
+                        )
                     );
 
 
-                /*
-                IMPORTANT:
-                Change row number
-                */
-
-                importedRow.setAttribute(
-                    "r",
-                    String(
-                        newRowNumber
-                    )
-                );
-
-
-                /*
-                Change every cell reference
-                */
-
-                const rowCells =
-                    importedRow
-                        .getElementsByTagNameNS(
-                            ns,
-                            "c"
-                        );
+                let dtr =
+                    "";
 
 
                 for (
                     const cell
-                    of rowCells
+                    of cells
                 ) {
 
-                    const oldRef =
+                    const reference =
                         cell.getAttribute(
                             "r"
                         );
 
 
-                    if (!oldRef) {
-                        continue;
-                    }
-
-
-                    const columnMatch =
-                        oldRef.match(
-                            /^([A-Z]+)/
+                    const column =
+                        getCellColumn(
+                            reference
                         );
 
 
                     if (
-                        columnMatch
+                        column ===
+                        columnNumber
                     ) {
 
-                        cell.setAttribute(
-                            "r",
-                            columnMatch[1] +
-                            newRowNumber
-                        );
+                        dtr =
+                            await getCellValue(
+                                cell,
+                                sharedStrings
+                            );
+
+                        break;
 
                     }
 
                 }
 
 
-                newSheetData.appendChild(
-                    importedRow
+                dtr =
+                    cleanText(dtr);
+
+
+                if (!dtr) {
+
+                    dtr =
+                        "Blank";
+
+                }
+
+
+                if (!groups.has(dtr)) {
+
+                    groups.set(
+                        dtr,
+                        []
+                    );
+
+                }
+
+
+                groups
+                    .get(dtr)
+                    .push(row);
+
+            }
+
+
+            /*
+            No groups
+            */
+
+            if (
+                groups.size === 0
+            ) {
+
+                alert(
+                    "DTR data nahi mila."
                 );
 
-
-                newRowNumber++;
+                return;
 
             }
 
 
+            document.getElementById(
+                "fileCount"
+            ).textContent =
+                groups.size;
+
+
             /*
-            Update dimension
+            =========================================
+            CREATE ZIP
+            =========================================
             */
 
-            const dimension =
-                newSheetXML
-                    .getElementsByTagNameNS(
-                        ns,
-                        "dimension"
-                    )[0];
+            const outputZIP =
+                new JSZip();
 
 
-            if (dimension) {
+            let counter =
+                0;
 
-                const oldRef =
-                    dimension.getAttribute(
-                        "ref"
+
+            /*
+            =========================================
+            PROCESS EACH DTR
+            =========================================
+            */
+
+            for (
+                const [
+                    dtr,
+                    matchingRows
+                ]
+                of groups
+            ) {
+
+                counter++;
+
+
+                document.getElementById(
+                    "status"
+                ).textContent =
+                    "Processing " +
+                    counter +
+                    " / " +
+                    groups.size +
+                    " : DTR " +
+                    dtr;
+
+
+                /*
+                Clone ORIGINAL XLSX
+                */
+
+                const newZip =
+                    await JSZip.loadAsync(
+                        await originalZip
+                            .generateAsync({
+                                type:
+                                    "arraybuffer"
+                            })
                     );
 
 
-                if (oldRef) {
+                /*
+                Read cloned sheet
+                */
 
-                    const start =
-                        oldRef.split(":")[0];
-
-
-                    const end =
-                        oldRef.split(":")[1] ||
-                        start;
-
-
-                    const endColumn =
-                        end.match(
-                            /^[A-Z]+/
-                        );
+                const clonedSheetFile =
+                    newZip.file(
+                        selectedSheetPath
+                    );
 
 
-                    if (endColumn) {
+                const clonedSheetText =
+                    await clonedSheetFile
+                        .async("text");
 
-                        dimension.setAttribute(
-                            "ref",
-                            start +
-                            ":" +
-                            endColumn[0] +
-                            (
-                                newRowNumber - 1
+
+                const newSheetXML =
+                    parseXML(
+                        clonedSheetText
+                    );
+
+
+                const newSheetData =
+                    newSheetXML
+                        .getElementsByTagNameNS(
+                            MAIN_NS,
+                            "sheetData"
+                        )[0];
+
+
+                /*
+                Existing rows
+                */
+
+                const existingRows =
+                    Array.from(
+                        newSheetData
+                            .getElementsByTagNameNS(
+                                MAIN_NS,
+                                "row"
                             )
-                        );
+                    );
 
-                    }
+
+                /*
+                Keep ONLY header row
+                */
+
+                for (
+                    let i = 1;
+                    i < existingRows.length;
+                    i++
+                ) {
+
+                    newSheetData
+                        .removeChild(
+                            existingRows[i]
+                        );
 
                 }
 
-            }
+
+                /*
+                =====================================
+                ADD ORIGINAL MATCHING ROWS
+                =====================================
+                */
+
+                let newRowNumber =
+                    2;
 
 
-            /*
-            Update AutoFilter
-            */
+                for (
+                    const sourceRow
+                    of matchingRows
+                ) {
 
-            const autoFilter =
-                newSheetXML
-                    .getElementsByTagNameNS(
-                        ns,
-                        "autoFilter"
-                    )[0];
+                    /*
+                    Clone complete row
+
+                    IMPORTANT:
+                    This keeps the original
+                    style attributes,
+                    including border.
+                    */
+
+                    const newRow =
+                        sourceRow.cloneNode(
+                            true
+                        );
 
 
-            if (autoFilter) {
+                    /*
+                    Change row number
+                    */
 
-                const oldRef =
-                    autoFilter.getAttribute(
-                        "ref"
+                    newRow.setAttribute(
+                        "r",
+                        String(
+                            newRowNumber
+                        )
                     );
 
 
-                if (oldRef) {
+                    /*
+                    Change cell references
+                    */
 
-                    const parts =
-                        oldRef.split(":");
+                    const rowCells =
+                        Array.from(
+                            newRow
+                                .getElementsByTagNameNS(
+                                    MAIN_NS,
+                                    "c"
+                                )
+                        );
 
 
-                    if (
-                        parts.length === 2
+                    for (
+                        const cell
+                        of rowCells
                     ) {
 
-                        const endColumn =
-                            parts[1].match(
-                                /^[A-Z]+/
+                        const oldReference =
+                            cell.getAttribute(
+                                "r"
                             );
 
 
-                        if (endColumn) {
+                        if (
+                            !oldReference
+                        ) {
 
-                            autoFilter.setAttribute(
+                            continue;
+
+                        }
+
+
+                        const columnMatch =
+                            oldReference.match(
+                                /^([A-Z]+)/
+                            );
+
+
+                        if (
+                            columnMatch
+                        ) {
+
+                            cell.setAttribute(
+                                "r",
+                                columnMatch[1] +
+                                newRowNumber
+                            );
+
+                        }
+
+                    }
+
+
+                    /*
+                    Add original row
+                    */
+
+                    newSheetData.appendChild(
+                        newRow
+                    );
+
+
+                    newRowNumber++;
+
+                }
+
+
+                /*
+                =====================================
+                UPDATE DIMENSION
+                =====================================
+                */
+
+                const dimension =
+                    newSheetXML
+                        .getElementsByTagNameNS(
+                            MAIN_NS,
+                            "dimension"
+                        )[0];
+
+
+                if (dimension) {
+
+                    const currentRef =
+                        dimension.getAttribute(
+                            "ref"
+                        );
+
+
+                    if (currentRef) {
+
+                        const parts =
+                            currentRef.split(":");
+
+
+                        let start =
+                            parts[0];
+
+
+                        let end =
+                            parts[1] ||
+                            parts[0];
+
+
+                        const endColumnMatch =
+                            end.match(
+                                /^([A-Z]+)/
+                            );
+
+
+                        if (
+                            endColumnMatch
+                        ) {
+
+                            dimension.setAttribute(
                                 "ref",
-                                parts[0] +
+                                start +
                                 ":" +
-                                endColumn[0] +
+                                endColumnMatch[1] +
                                 (
                                     newRowNumber - 1
                                 )
@@ -1563,193 +1842,194 @@ document
 
                 }
 
-            }
 
+                /*
+                =====================================
+                UPDATE AUTO FILTER
+                =====================================
+                */
 
-            /*
-            Replace sheet XML
-            */
-
-            newZip.file(
-                selectedSheetPath,
-                serializeXML(
+                const autoFilter =
                     newSheetXML
-                )
-            );
-
-
-            /*
-            Download only Sheet3:
-            remove other worksheet
-            entries from workbook.xml
-            */
-
-            const newWorkbookFile =
-                newZip.file(
-                    "xl/workbook.xml"
-                );
-
-
-            const newWorkbookText =
-                await newWorkbookFile.async(
-                    "text"
-                );
-
-
-            const newWorkbookXML =
-                parseXML(
-                    newWorkbookText
-                );
-
-
-            const workbookSheets =
-                newWorkbookXML
-                    .getElementsByTagNameNS(
-                        ns,
-                        "sheets"
-                    )[0];
-
-
-            const workbookSheetNodes =
-                Array.from(
-                    workbookSheets
                         .getElementsByTagNameNS(
-                            ns,
-                            "sheet"
-                        )
-                );
+                            MAIN_NS,
+                            "autoFilter"
+                        )[0];
 
 
-            for (
-                const sheetNode
-                of workbookSheetNodes
-            ) {
+                if (autoFilter) {
 
-                if (
-                    sheetNode.getAttribute(
-                        "name"
-                    ) !==
-                    selectedSheetName
-                ) {
-
-                    workbookSheets
-                        .removeChild(
-                            sheetNode
+                    const filterRef =
+                        autoFilter.getAttribute(
+                            "ref"
                         );
+
+
+                    if (filterRef) {
+
+                        const parts =
+                            filterRef.split(":");
+
+
+                        if (
+                            parts.length === 2
+                        ) {
+
+                            const endColumn =
+                                parts[1].match(
+                                    /^([A-Z]+)/
+                                );
+
+
+                            if (
+                                endColumn
+                            ) {
+
+                                autoFilter.setAttribute(
+                                    "ref",
+                                    parts[0] +
+                                    ":" +
+                                    endColumn[1] +
+                                    (
+                                        newRowNumber - 1
+                                    )
+                                );
+
+                            }
+
+                        }
+
+                    }
 
                 }
 
-            }
 
+                /*
+                =====================================
+                WRITE UPDATED SHEET
+                =====================================
+                */
 
-            newZip.file(
-                "xl/workbook.xml",
-                serializeXML(
-                    newWorkbookXML
-                )
-            );
-
-
-            /*
-            Create XLSX
-            */
-
-            const output =
-                await newZip.generateAsync({
-                    type: "blob",
-                    compression: "DEFLATE",
-                    compressionOptions: {
-                        level: 6
-                    }
-                });
-
-
-            /*
-            Safe filename
-            */
-
-            let filename =
-                dtr
-                    .replace(
-                        /[\\\/:*?"<>|]/g,
-                        "_"
+                newZip.file(
+                    selectedSheetPath,
+                    serializeXML(
+                        newSheetXML
                     )
-                    .trim();
+                );
 
 
-            if (!filename) {
-                filename = "Blank";
+                /*
+                =====================================
+                CREATE XLSX
+                =====================================
+                */
+
+                const xlsxBlob =
+                    await newZip.generateAsync({
+                        type: "blob",
+                        compression: "DEFLATE",
+                        compressionOptions: {
+                            level: 6
+                        }
+                    });
+
+
+                /*
+                =====================================
+                FILE NAME
+                =====================================
+                */
+
+                const filename =
+                    safeFileName(
+                        dtr
+                    ) +
+                    ".xlsx";
+
+
+                outputZIP.file(
+                    filename,
+                    xlsxBlob
+                );
+
+
+                /*
+                Allow browser to breathe
+                */
+
+                await new Promise(
+                    function(resolve) {
+
+                        setTimeout(
+                            resolve,
+                            0
+                        );
+
+                    }
+                );
+
             }
 
 
-            zip.file(
-                filename +
-                ".xlsx",
-                output
-            );
+            /*
+            =========================================
+            CREATE FINAL ZIP
+            =========================================
+            */
+
+            document.getElementById(
+                "status"
+            ).textContent =
+                "Final ZIP ban raha hai...";
 
 
-            counter++;
+            generatedZIP =
+                await outputZIP
+                    .generateAsync({
+                        type: "blob",
+                        compression: "DEFLATE",
+                        compressionOptions: {
+                            level: 6
+                        }
+                    });
+
+
+            /*
+            Show download
+            */
+
+            document.getElementById(
+                "downloadBtn"
+            ).style.display =
+                "inline-block";
 
 
             document.getElementById(
                 "status"
             ).textContent =
-                "Completed " +
-                counter +
-                " / " +
-                groups.size;
-
-
-            /*
-            Browser ko time
-            */
-
-            await new Promise(
-                resolve =>
-                    setTimeout(
-                        resolve,
-                        0
-                    )
-            );
+                "✅ Complete! " +
+                groups.size +
+                " DTR files ready.";
 
         }
 
+        catch(error) {
 
-        /*
-        ================================================
-        FINAL ZIP
-        ================================================
-        */
-
-        document.getElementById(
-            "status"
-        ).textContent =
-            "Final ZIP ban raha hai...";
+            console.error(error);
 
 
-        generatedZIP =
-            await zip.generateAsync({
-                type: "blob",
-                compression: "DEFLATE",
-                compressionOptions: {
-                    level: 6
-                }
-            });
+            document.getElementById(
+                "status"
+            ).textContent =
+                "Error.";
 
 
-        document.getElementById(
-            "downloadBtn"
-        ).style.display =
-            "inline-block";
+            alert(
+                "Split karte waqt error aaya:\n\n" +
+                error.message
+            );
 
-
-        document.getElementById(
-            "status"
-        ).textContent =
-            "Done! " +
-            groups.size +
-            " DTR files ready.";
+        }
 
     }
 );
@@ -1757,7 +2037,7 @@ document
 
 /*
 =========================================================
-DOWNLOAD
+DOWNLOAD ZIP
 =========================================================
 */
 
@@ -1770,7 +2050,7 @@ document
         if (!generatedZIP) {
 
             alert(
-                "Pehle Split Excel karein."
+                "Pehle Excel split karein."
             );
 
             return;
@@ -1828,4 +2108,5 @@ document
 </script>
 
 </body>
+
 </html>
