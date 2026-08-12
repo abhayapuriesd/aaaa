@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Excel Splitter</title>
+
+<!-- Excel Library -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+<!-- ZIP Library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<style>
+
+body {
+    font-family: Arial, sans-serif;
+    background: #f4f6f8;
+    margin: 0;
+    padding: 30px;
+}
+
+.container {
+    max-width: 900px;
+    margin: auto;
+    background: white;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 3px 15px rgba(0,0,0,0.12);
+}
+
+h1 {
+    margin-top: 0;
+}
+
+.upload-box {
+    border: 2px dashed #999;
+    padding: 30px;
+    text-align: center;
+    border-radius: 10px;
+    margin: 20px 0;
+}
+
+select,
+input[type="file"] {
+    padding: 10px;
+    margin: 8px;
+    font-size: 15px;
+}
+
+button {
+    padding: 12px 22px;
+    border: none;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 15px;
+    margin: 8px;
+}
+
+#splitBtn {
+    background: #1976d2;
+    color: white;
+}
+
+#downloadBtn {
+    background: #2e7d32;
+    color: white;
+    display: none;
+}
+
+#status {
+    margin-top: 20px;
+    font-weight: bold;
+}
+
+.info {
+    background: #f1f3f4;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>Excel Splitter</h1>
+
+<p>
+Excel file ko kisi bhi column ke base par multiple Excel files mein split karein.
+</p>
+
+
+<div class="upload-box">
+
+    <input
+        type="file"
+        id="fileInput"
+        accept=".xls,.xlsx"
+    >
+
+    <br>
+
+    <label>
+        <b>Sheet:</b>
+    </label>
+
+    <select id="sheetSelect" disabled>
+        <option>Select Excel first</option>
+    </select>
+
+    <br>
+
+    <label>
+        <b>Split By Column:</b>
+    </label>
+
+    <select id="columnSelect" disabled>
+        <option>Select Sheet first</option>
+    </select>
+
+    <br>
+
+    <button id="splitBtn">
+        Split Excel
+    </button>
+
+    <button id="downloadBtn">
+        Download ZIP
+    </button>
+
+</div>
+
+
+<div class="info">
+
+    <div>
+        <b>File:</b>
+        <span id="fileName">-</span>
+    </div>
+
+    <div>
+        <b>Total Rows:</b>
+        <span id="rowCount">-</span>
+    </div>
+
+    <div>
+        <b>Number of Files:</b>
+        <span id="fileCount">-</span>
+    </div>
+
+</div>
+
+
+<div id="status"></div>
+
+</div>
+
+
+<script>
+
+let workbook = null;
+let currentRows = [];
+let headers = [];
+let zipFile = null;
+
+
+/* =========================================
+   Excel File Upload
+========================================= */
+
+document
+.getElementById("fileInput")
+.addEventListener("change", async function(event) {
+
+    const file = event.target.files[0];
+
+    if (!file) {
+        return;
+    }
+
+    document.getElementById("fileName").textContent =
+        file.name;
+
+    document.getElementById("status").textContent =
+        "Excel read ho raha hai...";
+
+    try {
+
+        const arrayBuffer =
+            await file.arrayBuffer();
+
+        workbook = XLSX.read(
+            arrayBuffer,
+            {
+                type: "array",
+                cellDates: false
+            }
+        );
+
+
+        /* Sheet dropdown */
+
+        const sheetSelect =
+            document.getElementById("sheetSelect");
+
+        sheetSelect.innerHTML = "";
+
+        workbook.SheetNames.forEach(
+            function(sheetName) {
+
+                const option =
+                    document.createElement("option");
+
+                option.value = sheetName;
+
+                option.textContent = sheetName;
+
+                sheetSelect.appendChild(option);
+
+            }
+        );
+
+        sheetSelect.disabled = false;
+
+
+        /* First sheet load */
+
+        loadSheet(
+            workbook.SheetNames[0]
+        );
+
+
+        document.getElementById("status")
+            .textContent =
+            "Excel loaded successfully.";
+
+    }
+
+    catch(error) {
+
+        console.error(error);
+
+        document.getElementById("status")
+            .textContent =
+            "Excel read nahi ho paya.";
+
+        alert(error.message);
+
+    }
+
+});
+
+
+/* =========================================
+   Sheet Change
+========================================= */
+
+document
+.getElementById("sheetSelect")
+.addEventListener("change", function() {
+
+    loadSheet(this.value);
+
+});
+
+
+/* =========================================
+   Load Selected Sheet
+========================================= */
+
+function loadSheet(sheetName) {
+
+    if (!workbook) {
+        return;
+    }
+
+    const worksheet =
+        workbook.Sheets[sheetName];
+
+    currentRows =
+        XLSX.utils.sheet_to_json(
+            worksheet,
+            {
+                header: 1,
+                defval: "",
+                raw: false
+            }
+        );
+
+
+    if (currentRows.length === 0) {
+
+        document.getElementById("columnSelect")
+            .disabled = true;
+
+        return;
+    }
+
+
+    /*
+       First row = Header
+    */
+
+    headers = currentRows[0];
+
+
+    const columnSelect =
+        document.getElementById("columnSelect");
+
+    columnSelect.innerHTML = "";
+
+
+    headers.forEach(
+        function(header, index) {
+
+            let name =
+                String(header).trim();
+
+            if (!name) {
+
+                name =
+                    "Column " +
+                    (index + 1);
+
+            }
+
+
+            const option =
+                document.createElement("option");
+
+            option.value = index;
+
+            option.textContent = name;
+
+            columnSelect.appendChild(option);
+
+        }
+    );
+
+
+    columnSelect.disabled = false;
+
+
+    document.getElementById("rowCount")
+        .textContent =
+        Math.max(
+            currentRows.length - 1,
+            0
+        );
+
+}
+
+
+/* =========================================
+   Split Excel
+========================================= */
+
+document
+.getElementById("splitBtn")
+.addEventListener("click", async function() {
+
+    if (!workbook) {
+
+        alert("Pehle Excel file select karein.");
+
+        return;
+    }
+
+
+    if (currentRows.length < 2) {
+
+        alert("Selected sheet mein data nahi hai.");
+
+        return;
+    }
+
+
+    const columnIndex =
+        parseInt(
+            document.getElementById("columnSelect").value
+        );
+
+
+    const selectedHeader =
+        headers[columnIndex];
+
+
+    document.getElementById("status")
+        .textContent =
+        "Excel split ho raha hai...";
+
+
+    /*
+       Unique values collect karna
+    */
+
+    const groups = new Map();
+
+
+    for (
+        let i = 1;
+        i < currentRows.length;
+        i++
+    ) {
+
+        const row =
+            currentRows[i];
+
+
+        let value =
+            row[columnIndex];
+
+
+        if (
+            value === undefined ||
+            value === null ||
+            String(value).trim() === ""
+        ) {
+
+            value = "Blank";
+
+        }
+
+
+        value =
+            String(value).trim();
+
+
+        if (!groups.has(value)) {
+
+            groups.set(
+                value,
+                []
+            );
+
+        }
+
+
+        groups.get(value).push(row);
+
+    }
+
+
+    document.getElementById("fileCount")
+        .textContent =
+        groups.size;
+
+
+    /*
+       ZIP create
+    */
+
+    const zip =
+        new JSZip();
+
+
+    let counter = 0;
+
+
+    for (
+        const [value, rows] of groups
+    ) {
+
+        /*
+           Header + data
+        */
+
+        const outputData = [
+            headers,
+            ...rows
+        ];
+
+
+        /*
+           New workbook
+        */
+
+        const newWorkbook =
+            XLSX.utils.book_new();
+
+
+        const newWorksheet =
+            XLSX.utils.aoa_to_sheet(
+                outputData
+            );
+
+
+        XLSX.utils.book_append_sheet(
+            newWorkbook,
+            newWorksheet,
+            "Sheet1"
+        );
+
+
+        /*
+           Excel file create
+        */
+
+        const excelBuffer =
+            XLSX.write(
+                newWorkbook,
+                {
+                    bookType: "xlsx",
+                    type: "array"
+                }
+            );
+
+
+        /*
+           Filename safe banana
+        */
+
+        let safeName =
+            value
+                .replace(/[\\\/:*?"<>|]/g, "_")
+                .trim();
+
+
+        if (!safeName) {
+
+            safeName =
+                "Blank";
+
+        }
+
+
+        /*
+           Same filename duplicate na ho
+        */
+
+        let filename =
+            safeName + ".xlsx";
+
+
+        /*
+           ZIP mein add
+        */
+
+        zip.file(
+            filename,
+            excelBuffer
+        );
+
+
+        counter++;
+
+
+        document.getElementById("status")
+            .textContent =
+            "Processing " +
+            counter +
+            " / " +
+            groups.size +
+            "...";
+
+
+        /*
+           Browser ko thoda time dena
+        */
+
+        await new Promise(
+            resolve =>
+                setTimeout(resolve, 0)
+        );
+
+    }
+
+
+    /*
+       ZIP generate
+    */
+
+    zipFile =
+        await zip.generateAsync(
+            {
+                type: "blob"
+            },
+            function(metadata) {
+
+                document.getElementById("status")
+                    .textContent =
+                    "ZIP preparing: " +
+                    Math.round(metadata.percent) +
+                    "%";
+
+            }
+        );
+
+
+    document.getElementById("downloadBtn")
+        .style.display =
+        "inline-block";
+
+
+    document.getElementById("status")
+        .textContent =
+        "Completed! " +
+        groups.size +
+        " Excel files ready.";
+
+});
+
+
+/* =========================================
+   Download ZIP
+========================================= */
+
+document
+.getElementById("downloadBtn")
+.addEventListener("click", function() {
+
+    if (!zipFile) {
+
+        alert("Pehle Excel split karein.");
+
+        return;
+    }
+
+
+    const url =
+        URL.createObjectURL(zipFile);
+
+
+    const link =
+        document.createElement("a");
+
+
+    link.href = url;
+
+    link.download =
+        "Split_Excel_Files.zip";
+
+
+    document.body.appendChild(link);
+
+    link.click();
+
+    document.body.removeChild(link);
+
+
+    setTimeout(
+        function() {
+
+            URL.revokeObjectURL(url);
+
+        },
+        1000
+    );
+
+});
+
+</script>
+
+</body>
+</html>
